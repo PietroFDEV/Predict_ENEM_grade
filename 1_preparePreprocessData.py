@@ -1,12 +1,19 @@
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import OneHotEncoder
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_absolute_error
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout
+from tensorflow.keras.optimizers import Adam
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Load the dataset
+logging.info("Loading training dataset...")
 df = pd.read_csv('treinamento_alunos.csv')
 
 # Define the features and target
@@ -18,38 +25,63 @@ X = df[features]
 y = df['NU_NOTA_REDACAO']
 
 # Split the data into training, validation, and test sets
+logging.info("Splitting the dataset into train, validation, and test sets...")
 X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.3, random_state=42)
 X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, random_state=42)
 
 # Preprocessing pipeline
+logging.info("Setting up preprocessing pipeline...")
 preprocessor = ColumnTransformer(
     transformers=[
         ('cat', OneHotEncoder(handle_unknown='ignore'), features)
     ])
 
-# Define the Random Forest model pipeline
-model_pipeline = Pipeline(steps=[
-    ('preprocessor', preprocessor),
-    ('regressor', RandomForestRegressor(n_estimators=100, random_state=42))
+# Fit and transform the data
+X_train = preprocessor.fit_transform(X_train)
+X_val = preprocessor.transform(X_val)
+X_test = preprocessor.transform(X_test)
+
+# Define the model
+logging.info("Defining the neural network model...")
+model = Sequential([
+    Dense(512, activation='relu', input_shape=(X_train.shape[1],)),
+    Dropout(0.5),
+    Dense(256, activation='relu'),
+    Dropout(0.5),
+    Dense(128, activation='relu'),
+    Dropout(0.5),
+    Dense(1)
 ])
 
+# Compile the model with a lower learning rate
+optimizer = Adam(learning_rate=0.0001)
+model.compile(optimizer=optimizer, loss='mean_squared_error', metrics=['mae'])
+
 # Train the model
-model_pipeline.fit(X_train, y_train)
+logging.info("Training the model...")
+history = model.fit(X_train, y_train, epochs=200, batch_size=64, validation_data=(X_val, y_val))
 
 # Evaluate the model
-y_pred = model_pipeline.predict(X_test)
-test_mae = mean_absolute_error(y_test, y_pred)
-print(f'Test MAE: {test_mae}')
+logging.info("Evaluating the model...")
+test_loss, test_mae = model.evaluate(X_test, y_test)
+logging.info(f'Test MAE: {test_mae}')
 
 # Load the new data
+logging.info("Loading new data for predictions...")
 new_data = pd.read_csv('teste_alunos.csv')
 
-# Preprocess the new data and make predictions
+# Preprocess the new data
+logging.info("Preprocessing new data and making predictions...")
 new_data_processed = preprocessor.transform(new_data[features])
-predictions = model_pipeline.named_steps['regressor'].predict(new_data_processed)
+
+# Make predictions
+predictions = model.predict(new_data_processed)
 
 # Add the predictions to the new data
+logging.info("Adding predictions to the new data...")
 new_data['NU_NOTA_REDACAO'] = predictions
 
 # Save the updated data to a new CSV file
+logging.info("Saving the predictions to a new CSV file...")
 new_data.to_csv('teste_alunos_predicted.csv', index=False)
+logging.info("Done!")
