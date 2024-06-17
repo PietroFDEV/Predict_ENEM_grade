@@ -18,9 +18,9 @@ from tensorflow.keras.layers import Dense
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Função para criar o modelo de rede neural
-def create_nn_model():
+def create_nn_model(input_dim):
     model = Sequential([
-        Dense(128, activation='relu', input_dim=25),
+        Dense(128, activation='relu', input_dim=input_dim),
         Dense(64, activation='relu'),
         Dense(32, activation='relu'),
         Dense(1)
@@ -55,6 +55,11 @@ preprocessor = ColumnTransformer(
 # Ajustando o pré-processador nos dados de treinamento
 logging.info("Ajustando o pré-processador...")
 preprocessor.fit(X_train)
+
+# Transformando os dados
+X_train_transformed = preprocessor.transform(X_train)
+X_val_transformed = preprocessor.transform(X_val)
+X_test_transformed = preprocessor.transform(X_test)
 
 # Definindo e ajustando o modelo Decision Tree com RandomizedSearchCV
 logging.info("Ajustando o Decision Tree Regressor...")
@@ -116,14 +121,20 @@ gb_val_pred = gb_best_model.predict(X_val)
 gb_mae = mean_absolute_error(y_val, gb_val_pred)
 logging.info(f'Gradient Boosting MAE: {gb_mae}')
 
-# Adicionando o modelo de Rede Neural
+# Ajustando o modelo de Rede Neural com RandomizedSearchCV
 logging.info("Ajustando o modelo de Rede Neural...")
-nn_model = Pipeline(steps=[
-    ('preprocessor', preprocessor),
-    ('regressor', KerasRegressor(model=create_nn_model, epochs=50, batch_size=32, verbose=0))
-])
-nn_model.fit(X_train, y_train)
-nn_val_pred = nn_model.predict(X_val)
+input_dim = X_train_transformed.shape[1]
+nn_model = KerasRegressor(model=create_nn_model, input_dim=input_dim, epochs=50, batch_size=32, verbose=0)
+nn_param_dist = {
+    'epochs': sp_randint(50, 100),
+    'batch_size': sp_randint(16, 64),
+    'model__optimizer': ['adam', 'rmsprop']
+}
+nn_random_search = RandomizedSearchCV(nn_model, param_distributions=nn_param_dist, n_iter=5, cv=3, scoring='neg_mean_absolute_error', n_jobs=-1, verbose=2)
+nn_random_search.fit(X_train_transformed, y_train)
+logging.info(f"Melhores parâmetros para Rede Neural: {nn_random_search.best_params_}")
+nn_best_model = nn_random_search.best_estimator_
+nn_val_pred = nn_best_model.predict(X_val_transformed)
 nn_mae = mean_absolute_error(y_val, nn_val_pred)
 logging.info(f'Neural Network MAE: {nn_mae}')
 
@@ -133,20 +144,20 @@ estimators = [
     ('dt', dt_best_model),
     ('rf', rf_best_model),
     ('gb', gb_best_model),
-    ('nn', nn_model)
+    ('nn', nn_best_model)
 ]
 stacking_model = StackingRegressor(
     estimators=estimators,
     final_estimator=GradientBoostingRegressor(n_estimators=100, learning_rate=0.1, max_depth=3, random_state=42)
 )
-stacking_model.fit(X_train, y_train)
-stacking_val_pred = stacking_model.predict(X_val)
+stacking_model.fit(X_train_transformed, y_train)
+stacking_val_pred = stacking_model.predict(X_val_transformed)
 stacking_mae = mean_absolute_error(y_val, stacking_val_pred)
 logging.info(f'Stacking Regressor MAE: {stacking_mae}')
 
 # Avaliando o melhor modelo no conjunto de teste
 best_model = stacking_model
-test_pred = best_model.predict(X_test)
+test_pred = best_model.predict(X_test_transformed)
 test_mae = mean_absolute_error(y_test, test_pred)
 logging.info(f'Test MAE: {test_mae}')
 
@@ -158,14 +169,9 @@ new_data = pd.read_csv('teste_alunos.csv')
 logging.info("Pré-processando novos dados e fazendo previsões...")
 new_data_processed = preprocessor.transform(new_data[features])
 
-# Fazendo previsões
-predictions = best_model.predict(new_data_processed)
+# Fazendo previsões nos novos dados
+new_data['NU_NOTA_REDACAO'] = best_model.predict(new_data_processed)
 
-# Adicionando as previsões aos novos dados
-logging.info("Adicionando previsões aos novos dados...")
-new_data['NU_NOTA_REDACAO'] = predictions
-
-# Salvando os dados atualizados em um novo arquivo CSV
-logging.info("Salvando as previsões em um novo arquivo CSV...")
+# Salvando os novos dados com as previsões
 new_data.to_csv('teste_alunos_predicted.csv', index=False)
-logging.info("Concluído!")
+logging.info("Previsões salvas em 'teste_alunos_predicted.csv'")
