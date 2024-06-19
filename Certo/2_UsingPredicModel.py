@@ -59,6 +59,7 @@ def preprocess_new_data(new_data):
 
 # Load new data
 new_data = pd.read_csv('teste_alunos.csv')
+new_data_copy = new_data.copy()
 
 # Preprocess the new data
 new_X_scaled = preprocess_new_data(new_data)
@@ -70,10 +71,10 @@ new_stacked_preds = stacked_model.predict(new_X_scaled)
 new_stacked_preds = np.round(new_stacked_preds).astype(int)
 
 # Add the predictions to the new data
-new_data['NU_NOTA_REDACAO'] = new_stacked_preds
+new_data_copy['NU_NOTA_REDACAO'] = new_stacked_preds
 
 # Save the updated data to a new CSV file
-new_data.to_csv('teste_alunos_with_predictions.csv', index=False)
+new_data_copy.to_csv('teste_alunos_with_predictions.csv', index=False)
 
 
 ### Alunos:
